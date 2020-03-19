@@ -6,7 +6,21 @@ report.packages.cran <- c("dplyr",
                           "forcats",
                           "rsample",
                           "ranger",
-                          "pROC")
+                          "pROC",
+                          "ROCR",
+                          "recipes",
+                          "keras",
+                          "skimr",
+                          "plyr",
+                          "missForest",
+                          "mlr3verse",
+                          "recipes",
+                          "randomForest",
+                          "data.table",
+                          "rpart",
+                          "DataExplorer",
+                          "yardstick",
+                          "ggplot2")
 
 # Packages on BioConductor:
 report.packages.bioc <- c()
