@@ -1,0 +1,438 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+
+```{r}
+# firstly, we load the data
+setwd("../")
+source("03_load_data.R")
+```
+
+```{r}
+# then load all packages we need 
+library("skimr")
+library("plyr")
+library("missForest")
+library("rsample")
+library("mlr3verse")
+library("data.table")
+library("rpart")
+library("randomForest")
+library("pROC")
+library("ROCR")
+library("recipes")
+library("keras")
+library("DataExplorer")
+library("yardstick")
+library("ggplot2")
+```
+
+```{r}
+# have a look at our data
+skim(uci.adult)
+```
+
+Attribute Information:
+
+Listing of attributes:
+
+>50K, <=50K.
+
+age: continuous.
+workclass: Private, Self-emp-not-inc, Self-emp-inc, Federal-gov, Local-gov, State-gov, Without-pay, Never-worked.
+fnlwgt: continuous.
+education: Bachelors, Some-college, 11th, HS-grad, Prof-school, Assoc-acdm, Assoc-voc, 9th, 7th-8th, 12th, Masters, 1st-4th, 10th, Doctorate, 5th-6th, Preschool.
+education-num: continuous.
+marital-status: Married-civ-spouse, Divorced, Never-married, Separated, Widowed, Married-spouse-absent, Married-AF-spouse.
+occupation: Tech-support, Craft-repair, Other-service, Sales, Exec-managerial, Prof-specialty, Handlers-cleaners, Machine-op-inspct, Adm-clerical, Farming-fishing, Transport-moving, Priv-house-serv, Protective-serv, Armed-Forces.
+relationship: Wife, Own-child, Husband, Not-in-family, Other-relative, Unmarried.
+race: White, Asian-Pac-Islander, Amer-Indian-Eskimo, Other, Black.
+sex: Female, Male.
+capital-gain: continuous.
+capital-loss: continuous.
+hours-per-week: continuous.
+native-country: United-States, Cambodia, England, Puerto-Rico, Canada, Germany, Outlying-US(Guam-USVI-etc), India, Japan, Greece, South, China, Cuba, Iran, Honduras, Philippines, Italy, Poland, Jamaica, Vietnam, Mexico, Portugal, Ireland, France, Dominican-Republic, Laos, Ecuador, Taiwan, Haiti, Columbia, Hungary, Guatemala, Nicaragua, Scotland, Thailand, Yugoslavia, El-Salvador, Trinadad&Tobago, Peru, Hong, Holand-Netherlands.
+
+```{r}
+# data processing 
+set.seed(222) 
+#we can see here we have 41 countries, it's unnecessarily and might lead to overfitting, thus we might merge countries into areas
+
+levels(uci.adult$native_country)<- list(Outlying_us=c(" South"," Outlying-US(Guam-USVI-etc)"),Southeast_Asia=c(" Vietnam"," Laos"," Cambodia"," Thailand"),Asia=c(" China"," India"," Hong"," Iran"," Philippines","  Taiwan"),North_America=c(" Canada"," Cuba"," Dominican-Republic"," Guatemala"," Haiti"," Honduras"," Jamaica"," Mexico"," Nicaragua"," Puerto-Rico"," El-Salvador"," United-States"), South_America=c(" Ecuador"," Peru"," Columbia"," Trinadad&Tobago"),Europe=c(" France"," Germany"," Greece"," Holand-Netherlands"," Italy"," Hungary"," Ireland"," Poland"," Portugal"," Scotland"," England"," Yugoslavia", " France"))
+
+# with the same purpose, we want to minimise the "education" and "occupation" factors
+levels(uci.adult$education) <- list(preschool=c(" Preschool"),primary=c(" 1st-4th"," 5th-6th"," 7th-8th"), middle=c(" 9th"," Assoc-acdm"," Assoc-voc"," 10th"),high=c(" 11th"," 12th"), higheredu=c(" Bachelors"," Some-college"),master=c(" Masters"), phd=c(" Doctorate"))
+
+levels(uci.adult$occupation) <- 
+list(clerical=c(" Adm-clerical"), lowskill=c(" Craft-repair"," Handlers-cleaners"," Machine-op-inspct"," Other-service"," Priv-house-serv"," Prof-specialty"," Protective-serv"),highskill=c(" Sales"," Tech-support"," Transport-moving"," Armed-Forces"),agriculture=c(" Farming-fishing"))
+
+# Then we can find missing data in features "workclass", "occupation" and "native-country"
+# impute missing data by an iterative imputation method
+uci.adult <- missForest::missForest(uci.adult)
+uci.adult <- uci.adult$ximp
+
+```
+
+Have a look at our data.
+```{r}
+skim(uci.adult)
+DataExplorer::plot_bar(uci.adult, ncol = 3)
+DataExplorer::plot_histogram(uci.adult, ncol = 3)
+```
+Literally, there are some features we should pay more attention to, such as workclass, education, working hours and occupation. Well-educated people are more likely to have high salary jobs, so let's have a look at relationships between these features and income levels.
+
+```{r}
+boxplot(education_num~annual_income,data=uci.adult, main="Relationship between education_num and income")
+boxplot(hours_per_week~annual_income,data=uci.adult, main="Relationship between working hours and income")
+
+qplot(annual_income, data = uci.adult, fill = occupation) + facet_grid (. ~ occupation)
+qplot(annual_income, data = uci.adult, fill = workclass) + facet_grid (. ~ workclass)
+```
+Since the relationships between features and income, we can consider using tree method to train these data.
+```{r}
+# Benchmark, Cart and nested cross-validation
+set.seed(222) 
+adult_task <- TaskClassif$new(id = "Adult",
+                               backend = uci.adult,
+                               target = "annual_income",
+                               positive = " >50K")
+
+# apply cross-validation
+cv10 <- rsmp("cv", folds = 10)
+cv10$instantiate(adult_task)
+
+lrn_baseline <- lrn("classif.featureless", predict_type = "prob")
+lrn_cart <- lrn("classif.rpart", predict_type = "prob")
+
+res <- benchmark(data.table(
+  task       = list(adult_task),
+  learner    = list(lrn_baseline,
+                    lrn_cart),
+  resampling = list(cv10)
+), store_models = TRUE)
+
+res$aggregate(list(msr("classif.ce"),
+                   msr("classif.acc"),
+                   msr("classif.auc"),
+                   msr("classif.tpr"),
+                   msr("classif.tnr")))
+```
+
+From the table, we can see that by using CART we can get 0.86 accuracy and for the baseline model we have 0.76. It improves a lot, but now we try to using nested cross-validation to get a better result.
+
+```{r}
+set.seed(222) 
+lrn_cart_cv <- lrn("classif.rpart", predict_type = "prob", xval = 10)
+res_cart_cv <- resample(adult_task, lrn_cart_cv, cv10, store_models = TRUE)
+rpart::plotcp(res_cart_cv$learners[[10]]$model)
+```
+From the plot above, we choose 0.023 as alpha for CART.
+```{r}
+set.seed(222) 
+lrn_cart_cp <- lrn("classif.rpart", predict_type = "prob", cp = 0.023)
+res <- benchmark(data.table(
+  task       = list(adult_task),
+  learner    = list(lrn_baseline,
+                    lrn_cart,
+                    lrn_cart_cp),
+  resampling = list(cv10)
+), store_models = TRUE)
+
+res$aggregate(list(msr("classif.ce"),
+                   msr("classif.acc"),
+                   msr("classif.auc"),
+                   msr("classif.tpr"),
+                   msr("classif.tnr")))
+
+# Let's have a look at the tree
+# the 3rd model lrn_cart_cp
+trees <- res$resample_result(3)
+
+# the 10_th fold
+tree1 <- trees$learners[[10]]
+tree1_rpart <- tree1$model
+plot(tree1_rpart, compress = TRUE, margin = 0.1)
+text(tree1_rpart, use.n = TRUE, cex = 0.6)
+```
+
+However, after tuning the alpha, we can gain 0.859 for accuracy and 0.86 for auc. That's still not good enough, let's train a random forest.
+
+```{r}
+# Apply random forest
+set.seed(222) 
+adult.rfFit<- randomForest(annual_income~.,ntree=500, data= uci.adult)
+adult.rfFit
+
+# accuracy
+acc <- (adult.rfFit$confusion[1]+adult.rfFit$confusion[4])/sum(adult.rfFit$confusion)
+acc
+
+# auc
+rf_p_train <- predict(adult.rfFit, type="prob")[,2]
+rf_pr_train <- prediction(rf_p_train, uci.adult$annual_income)
+r_auc_train1 <- performance(rf_pr_train, measure = "auc")@y.values[[1]] 
+r_auc_train1
+
+#tpr
+tpr <- adult.rfFit$confusion[4]/(adult.rfFit$confusion[3]+adult.rfFit$confusion[4])
+tpr
+```
+
+Now we can get 0.88 for accuracy and 0.93 for auc, and true positive rate grow to 0.79 compared with CART. Recalling that we have a hugh dataset, 32561 observations of 15 variables, which are suitable for deep neural networks training. Let's train a mlp network and see if it can perform better.
+```{r}
+# split the dataset into train, validate and test data
+set.seed(222) 
+# First get the training
+adult_split <- initial_split(uci.adult)
+adult_train <- training(adult_split)
+
+# Then further split the training into validate and test
+adult_split2 <- initial_split(testing(adult_split), 0.5)
+adult_validate <- training(adult_split2)
+adult_test <- testing(adult_split2)
+```
+
+```{r}
+# Now we want to encode the data to suit neural networks training.
+
+cake <- recipe(annual_income ~ ., data = uci.adult) %>%
+  step_center(all_numeric()) %>% # center by subtracting the mean from all numeric features
+  step_scale(all_numeric()) %>% # scale by dividing by the standard deviation on all numeric features
+  step_dummy(all_nominal(), one_hot = TRUE) %>% # turn all factors into a one-hot coding
+  prep(training = uci.adult) # learn all the parameters of preprocessing on the training data
+
+adult_train_final <- bake(cake, new_data = adult_train) # apply preprocessing to training data
+adult_validate_final <- bake(cake, new_data = adult_validate) # apply preprocessing to validation data
+adult_test_final <- bake(cake, new_data = adult_test) # apply preprocessing to testing data
+
+adult_train_final <- adult_train_final %>%
+  mutate(annual_income_below50 = annual_income_X...50K ,
+            annual_income_over50 = annual_income_X..50K,
+  )%>%
+  select(-annual_income_X...50K, -annual_income_X..50K)
+
+adult_validate_final <- adult_validate_final %>%
+  mutate(
+            annual_income_below50 = annual_income_X...50K ,
+            annual_income_over50 = annual_income_X..50K,
+  )%>%
+  select(-annual_income_X...50K, -annual_income_X..50K)
+
+adult_test_final <- adult_test_final %>%
+  mutate(
+            annual_income_below50 = annual_income_X...50K ,
+            annual_income_over50 = annual_income_X..50K,
+  )%>%
+  select(-annual_income_X...50K, -annual_income_X..50K)
+
+# split the response variables and independent variables
+adult_train_x <- adult_train_final %>%
+  select(-starts_with("annual_")) %>%
+  as.matrix()
+adult_train_y <- adult_train_final %>%
+  select(annual_income_over50) %>%
+  as.matrix()
+
+adult_validate_x <- adult_validate_final %>%
+  select(-starts_with("annual_")) %>%
+  as.matrix()
+adult_validate_y <- adult_validate_final %>%
+  select(annual_income_over50) %>%
+  as.matrix()
+
+adult_test_x <- adult_test_final %>%
+  select(-starts_with("annual_")) %>%
+  as.matrix()
+adult_test_y <- adult_test_final %>%
+  select(annual_income_over50) %>%
+  as.matrix()
+```
+
+```{r}
+
+# firstly, we build a MLP network to train the model
+deep.net <- keras_model_sequential() %>%
+  layer_dense(units = 256, activation = "relu",
+              input_shape = c(ncol(adult_train_x))) %>%
+  layer_batch_normalization() %>%
+  layer_dropout(rate = 0.2) %>%
+  layer_dense(units = 128, activation = "relu") %>%
+  layer_batch_normalization() %>%
+  layer_dropout(rate = 0.2) %>%
+  layer_dense(units = 128, activation = "relu") %>%
+  layer_batch_normalization() %>%
+  layer_dropout(rate = 0.2) %>%
+  layer_dense(units = 64, activation = "relu") %>%
+  layer_batch_normalization() %>%
+  layer_dropout(rate = 0.2) %>%
+  layer_dense(units = 1, activation = "sigmoid")
+summary(deep.net)
+
+deep.net %>% compile(
+  loss = "binary_crossentropy",
+  optimizer = optimizer_adam(),
+  metrics = c("accuracy")
+)
+
+batchsize = 64
+train_steps = round(dim(adult_train_x)[1]/batchsize,0)
+mlp_filepath = "mlp_network.h5"
+
+mlp_history <- deep.net %>% fit(
+  adult_train_x, adult_train_y,
+  epochs = 50, batch_size = batchsize, 
+  validation_data = list(adult_validate_x, adult_validate_y)
+) 
+
+# save the model
+deep.net %>% save_model_hdf5(mlp_filepath)
+```
+
+```{r}
+# evaluate the test dataset's accuracy
+
+# deep.net %>% evaluate(adult_test_x,adult_test_y)
+y_pro <- deep.net %>% predict_proba(adult_test_x,batch_size = 128)
+y_hat <- deep.net %>% predict_classes(adult_test_x,batch_size = 128)
+
+# CONFUSION TABLE
+con_table0 <- table(y_hat, adult_test_y)
+con_table0
+
+# ACC
+acc0 <- yardstick::accuracy_vec(as.factor(adult_test_y),
+                        as.factor(y_hat))
+acc0
+# AUC
+auc0 <- yardstick::roc_auc_vec(as.factor(adult_test_y),
+                       c(y_pro))
+auc0
+# tpr
+tpr0 <- con_table0[4]/(con_table0[3]+con_table0[4])
+tpr0
+
+# plot and save the curve
+plot(mlp_history)
+
+jpeg(file = "../Plots/mlp_training_curve.jpeg")
+plot(mlp_history)
+dev.off()
+
+```
+
+From the plots above, we can observe huge overfitting. Now applying regularsation to aviod this happened.
+
+```{r}
+
+deep.net1 <- keras_model_sequential() %>%
+  layer_dense(units = 256, activation = "relu",
+              input_shape = c(ncol(adult_train_x)),
+              kernel_regularizer = regularizer_l2(l = 0.0001)) %>%
+  layer_batch_normalization() %>%
+  layer_dropout(rate = 0.4) %>%
+  layer_dense(units = 128, activation = "relu",kernel_regularizer = regularizer_l2(l = 0.0001)) %>%
+  layer_batch_normalization() %>%
+  layer_dropout(rate = 0.4) %>%
+  layer_dense(units = 128, activation = "relu",kernel_regularizer = regularizer_l2(l = 0.0001)) %>%
+  layer_batch_normalization() %>%
+  layer_dropout(rate = 0.4) %>%
+  layer_dense(units = 64, activation = "relu",kernel_regularizer = regularizer_l2(l = 0.0001)) %>%
+  layer_batch_normalization() %>%
+  layer_dropout(rate = 0.4) %>%
+  layer_dense(units = 1, activation = "sigmoid")
+summary(deep.net1)
+
+deep.net1 %>% compile(
+  loss = "binary_crossentropy",
+  optimizer = optimizer_adam(),
+  metrics = c("accuracy")
+)
+
+batchsize = 64
+train_steps = round(dim(adult_train_x)[1]/batchsize,0)
+mlpre_filepath = "mlp_regularization.h5"
+
+# This time we apply callback to save the best model
+cp_callback <- callback_model_checkpoint(
+  filepath = mlpre_filepath,
+  monitor = "accuracy",
+  save_best_only = TRUE
+)
+
+mlpre_history <- deep.net1 %>% fit(
+  adult_train_x, adult_train_y,
+  epochs = 50, batch_size = batchsize,steps_per_epoch = train_steps,
+  validation_data = list(adult_validate_x, adult_validate_y),
+  callbacks = list(cp_callback)
+)
+```
+
+```{r}
+# load our best model and evaluate the test dataset's accuracy
+
+model <- load_model_hdf5("mlp_regularization.h5")
+
+y_pro <- model %>% predict_proba(adult_test_x,batch_size = 128)
+y_hat <- model %>% predict_classes(adult_test_x,batch_size = 128)
+
+# CONFUSION TABLE
+con_table1 <- table(y_hat, adult_test_y)
+con_table1
+
+# ACC
+acc1 <- yardstick::accuracy_vec(as.factor(adult_test_y),
+                        as.factor(y_hat))
+acc1
+# AUC
+auc1 <- yardstick::roc_auc_vec(as.factor(adult_test_y),
+                       c(y_pro))
+auc1
+
+# tpr
+tpr1 <- con_table1[4]/(con_table1[3]+con_table1[4])
+tpr1
+
+# plot and save the curve
+plot(mlpre_history)
+
+jpeg(file = "../Plots/mlpre_training_curve.jpeg")
+plot(mlpre_history)
+dev.off()
+```
+Now let's compare different models.
+```{r}
+model_result <- data.frame(
+  Model=c("Baseline","CART","RandomForest","MLP","MLP_Regu"),
+  Accuracy=c(0.759,0.866,0.886,0.876,0.887),
+  AUC=c(0.5,0.872,0.933,0.933,0.937),
+  TruePositive=c(0,0.608,0.795,0.661,0.721)
+)
+model_result
+
+gg <- ggplot(model_result,aes(x=Model,y=Accuracy,fill=Model))+geom_bar(stat = 'identity')+theme_bw()+ggtitle('Accuracies of Models')+ylim(0,1)
+gg
+
+gg1 <- ggplot(model_result,aes(x=Model,y=AUC,fill=Model))+geom_bar(stat = 'identity')+theme_bw()+ggtitle('AUC of Models')+ylim(0,1)
+gg1
+
+gg2 <- ggplot(model_result,aes(x=Model,y=TruePositive,fill=Model))+geom_bar(stat = 'identity')+theme_bw()+ggtitle('True positive rates of Models')+ylim(0,1)
+gg2
+
+```
+
+
+
+
+
+
+
+
+
+
+

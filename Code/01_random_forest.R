@@ -9,6 +9,7 @@ pred.rf <- data.frame(Setosa = double(),
                       Versicolor = double(),
                       Virginica = double(),
                       Truth = character())
+uci.iris
 for(i in 1:3) {
   fit.rf[[i]] <- ranger(Class ~ ., data = analysis(uci.iris.cv$splits[[i]]), probability = TRUE)
 }
