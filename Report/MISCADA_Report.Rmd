@@ -15,13 +15,13 @@ Github repository: https://github.com/chuckwong13/MISCADA_CoreIIA_Classification
 
 ## Part I: Executive summary
 
-In this project, we are going to analyze "adult" data from UCI, which contain people's personal information like age, workclass, education, occupation, capital gain and so on. Our target is to use these features to train models to predict if a person earns more than 50000 dollars a year. 
+In this project, we are going to analyze "adult" data from UCI, which contains people's personal information like age, workclass, education, occupation, capital gain and so on. Our target is to use these features to train models to predict if a person earns more than 50000 dollars a year. 
 
-In real-world, these model can be very practical because companies like investment banks, insurance companies, luxury goods company focus more on high-net-worth clients, whose annual income are more likely over 50000 dollars. By using these models, we can tell if a person is a potential target client based on other features we have, which helps improve efficiency while telemarketing and digital marketing. Meanwhile, companies can reduce advertising costs by achieving this, and people with lower income can avoid harassed by irrelevant advertising.
+In real-world, these model can be very practical because companies like investment banks, insurance companies, luxury goods company focusing on high-net-worth clients, whose annual income are more likely over 50000 dollars. By using these models, we can tell if a person is a potential target client based on other features we have, which helps improve efficiency while telemarketing and digital marketing. Meanwhile, companies can reduce advertising costs by achieving this, and people with lower income can avoid harassed by irrelevant advertising.
 
 ![Accuracies of trained models.](../Plots/models_accuracies.png)
 
-We fit five predictive models - a baseline model, a CART (Classification And Regression Trees) model, a random forest model, an MLP (Multi-Layer Perceptron) model and an MLP model with regularisation. Their accuracies (Number of successful predictions/ Number of predictions) are shown in Figure 2. According to the figure, we can observe that random forest performs the best among these models, it can achieve the accuracy of 88%. Compared with the baseline model (randomly choose a class), it made great progress.
+We fit five predictive models - a baseline model, a CART (Classification And Regression Trees) model, a random forest model, an MLP (Multi-Layer Perceptron) model and an MLP model with regularisation. Their accuracies (Number of successful predictions/ Number of predictions) are shown in Figure 2. According to the figure, we can observe that random forest performs the best among these models, it can achieve the accuracy of 88%. Compared with the baseline model's 76% (randomly choose a class), it made great progress.
 
 However, accuracy is not the most important objective we care about. With the purpose of targeting high-income clients, companies are more interested in the true positive rate (the percentage of rich people who are correctly identified as rich). And the true positive rates of different models are shown below.
 
@@ -33,7 +33,7 @@ It seems that the random forest model wins again, by achieving the true positive
 
 The modelling process can be divided into three parts – data preprocessing, predictive models training and performance comparison.
 
-**A. Data Preprocessing**
+**Data Preprocessing**
 
 1. Overview of Data
 
@@ -45,7 +45,7 @@ From the summary of the dataset, we know that it has 9 categorical characteristi
 Firstly, we begin by minimizing the factor variables’ levels to make them easy to understand and meaningful. For the "native_country" variables, what we can do is to group several countries by different regions:
 
 ![Factor levels of native country.](../Plots/factor_nativecountry.png)
-Similarly, we can apply this method to collapse levels of factor variables “education” and “occupation”.
+Similarly, we can apply this method to collapse levels of factor variables “education” and “occupation” (see the code for details).
 
 Secondly, in order to deal with missing data, we will randomly impute data from that variable by using package "missForest". Other than making all the missing data unknown, this method helps models improve their accuracies by nearly 3%.
 
@@ -56,13 +56,13 @@ There are some features we should pay more attention to, such as workclass, educ
 ![Relationship between education and income.](../Plots/edu_income.png)
 It is obvious that the more educated, the easier people might have an over 50000 dollars annual income. The same situation happens in variables such as working hours, ages, occupation, etc. By this reason, I think CART is a proper model to fit these datasets.
 
-**B. Predictive Models Training**
+**Predictive Models Training**
 
 1. Baseline and CART
 
 Because of the imbalance of our response variable – 7841 over 50k, 24720 below, we need to introduce a baseline model to see if our models work. It shows that the baseline model can gain 76% accuracy and 50% AUC. Then we fit a CART model by using the package “mlr3verse”. With 10-fold cross-validation, this model can reach 86% accuracy, 87% AUC and 61% true positive rate. To improve this model, nest-validation was employed, from the cost penalty-error plot, we can set cp as 0.023 to avoid overfitting. 
 
-However, the model accuracy drops to 86% and AUC fall to 86%, but the true positive rate increase to 65%. The result is good, but let’s try constructing a multitude of decision trees(random forest) and see if it can improve.
+However, the model accuracy drops to 86% and AUC fall to 86%, but the true positive rate increase to 65%. The result is good, but let’s try to construct a multitude of decision trees(random forest) and see if it can improve.
 
 2. Random Forest
 
@@ -70,17 +70,17 @@ By using the package “randomForest”, we trained a random forest model with 5
 
 3. Multi-Layer Perceptron
 
-Recalling that we have a huge dataset, containing 32561 observations of 15 variables, I think it quite suitable to train a neural network. Instead of applying cross-validation, here we split the datasets into train/test/validate data, turn all the categorical variables into one-hot coding and scale all the numeric variables to mean 0, standard deviation 1. As for loss function and optimizer choices, we set binary cross-entropy and Adam respectively.
+Recalling that we have a huge dataset, containing 32561 observations of 15 variables, I think it quite suitable to train a neural network. Instead of applying cross-validation, here we split the datasets into train/test/validate data, turn all the categorical variables into one-hot coding and scale all the numeric variables to mean 0, standard deviation 1. As for loss function and optimizer choices, we set binary cross-entropy and Adam respectively. 
 
-At first, I tried to train a neural work with 5 layers, whose units number are 256, 128, 128, 64, 1. To avoid overfitting, batch normalization and layer dropout(0.2) were added. After training, this model can get 87% accuracy, 93% AUC and 66% true positive, which is a good result except for the true positive rate compared with the random forest.
+At first, I tried to train a neural work with 5 layers, whose units number are 256, 128, 128, 64, 1. And the activation function for the first 4 layers is Relu, for the last output layer is Sigmoid. To avoid overfitting, batch normalization and layer dropout(0.2) were added. After training, this model can get 87% accuracy, 93% AUC and 66% true positive, which is a good result except for the true positive rate compared with the random forest.
 
-Aiming at getting a better true positive rate, we are going to raise the dropout rate to 0.4  and embed L2 regularizer(lambda = 0.0001) into each layer. Besides, “callbacks” function is utilized to save the best model we trained. The training curves of loss and accuracy are shown below.
+Aiming at avoiding overfitting to get a better true positive rate, we are going to raise the dropout rate to 0.4  and embed L2 regularizer(lambda = 0.0001) into each layer. Besides, “callbacks” function, which can show the whole training curve compared with early stop, is utilized to save the best model we trained. The training curves of loss and accuracy are shown below.
 
 ![Training curves of MLP-regularisation.](../Plots/mlpre_training_curve.jpeg)
 
 This time we get a better result as wishes. Even though the increases in accuracy and AUC is small, 88% and 93% respectively, the true positive rate boost from 66% to 72%, which is huge progress.
 
-**C. Performance Comparison**
+**Performance Comparison**
 
 From the executive summary, we can know that the random forest model and the MLP-regularisation model perform the best among all these models. But there is still an objective we should care about – AUC. Literally, AUC means the area under the receiver operating characteristics curve, in other words, it tells us how well the model can distinguish between people with high income and low income.
 
